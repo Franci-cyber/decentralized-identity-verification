@@ -44,3 +44,60 @@
 (define-private (is-credential-revoked (credential-id uint))
   (default-to false (map-get? revoked-credentials credential-id)))
 
+;; Issues a new credential.
+(define-private (create-credential (uri (string-ascii 256)))
+  (let ((credential-id (+ (var-get last-credential-id) u1)))
+    (asserts! (is-valid-uri uri) err-invalid-uri)              ;; Validate URI
+    (try! (nft-mint? identity-credential credential-id tx-sender)) ;; Mint the credential NFT
+    (map-set credential-uri credential-id uri)                 ;; Store metadata URI
+    (var-set last-credential-id credential-id)                 ;; Update last credential ID
+    (ok credential-id)))
+
+;; Public Functions
+
+;; Issues a new identity credential.
+(define-public (issue-credential (uri (string-ascii 256)))
+  (begin
+    (asserts! (is-valid-uri uri) err-invalid-uri)
+    (create-credential uri)))
+
+;; Revokes an existing credential.
+(define-public (revoke-credential (credential-id uint))
+  (let ((owner (unwrap! (nft-get-owner? identity-credential credential-id) err-credential-not-found)))
+    (asserts! (is-eq tx-sender owner) err-unauthorized)       ;; Ensure sender is the owner
+    (asserts! (not (is-credential-revoked credential-id)) err-credential-revoked) ;; Check not already revoked
+    (map-set revoked-credentials credential-id true)          ;; Mark as revoked
+    (ok true)))
+
+;; Transfers a credential to another principal.
+(define-public (transfer-credential (credential-id uint) (recipient principal))
+  (begin
+    (asserts! (not (is-credential-revoked credential-id)) err-credential-revoked) ;; Ensure not revoked
+    (try! (nft-transfer? identity-credential credential-id tx-sender recipient))  ;; Transfer the credential
+    (ok true)))
+
+;; Updates the metadata URI of a credential.
+(define-public (update-credential-uri (credential-id uint) (new-uri (string-ascii 256)))
+  (let ((owner (unwrap! (nft-get-owner? identity-credential credential-id) err-credential-not-found)))
+    (asserts! (is-eq tx-sender owner) err-unauthorized)      ;; Ensure sender is the owner
+    (asserts! (is-valid-uri new-uri) err-invalid-uri)        ;; Validate new URI
+    (map-set credential-uri credential-id new-uri)          ;; Update metadata URI
+    (ok true)))
+
+;; Read-Only Functions
+
+;; Fetches the metadata URI of a credential.
+(define-read-only (get-credential-uri (credential-id uint))
+  (ok (map-get? credential-uri credential-id)))
+
+;; Fetches the owner of a credential.
+(define-read-only (get-credential-owner (credential-id uint))
+  (ok (nft-get-owner? identity-credential credential-id)))
+
+;; Fetches the latest issued credential ID.
+(define-read-only (get-last-credential-id)
+  (ok (var-get last-credential-id)))
+
+;; Checks if a credential is revoked.
+(define-read-only (is-revoked (credential-id uint))
+  (ok (is-credential-revoked credential-id)))
